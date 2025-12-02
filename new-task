@@ -2,7 +2,11 @@
 
 read -p "Task number: " num
 name="day$num"
+
 mkdir $name
+
 cp ./main.go $name/main.go
 cd $name
+
 go mod init $name
+touch input
