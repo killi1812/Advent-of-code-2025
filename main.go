@@ -15,5 +15,5 @@ func read() []string {
 	if err != nil {
 		panic(err)
 	}
-	return strings.Split(string(data), "\n")
+	return strings.Split(strings.TrimSpace(string(data)), "\n")
 }
