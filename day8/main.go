@@ -13,11 +13,15 @@ func main() {
 	input := read()
 	cords := parse(input)
 
-	mcir.Connect(Closest(cords))
-	fmt.Printf("mcir: %+v\n", mcir)
-
-	mcir.Connect(Closest(cords))
-	fmt.Printf("mcir: %+v\n", mcir)
+	for range 10 {
+		p1, p2 := Closest(cords)
+		p1.Connect(p2)
+		fmt.Printf("p1: %+v\n", p1)
+		fmt.Printf("p2: %+v\n", p2)
+		fmt.Printf("%v\n", p1.IsConnected(*p2))
+		fmt.Printf("%v\n", p2.IsConnected(*p1))
+	}
+	fmt.Printf("cords: %v\n", cords)
 }
 
 func read() []string {
@@ -35,20 +39,22 @@ type poz struct {
 	connections []*poz
 }
 
-type circuit struct {
-	connections []poz
-}
-
-var mcir circuit = circuit{}
-
-func (c circuit) IsConnected(key, value poz) bool {
-	return slices.IndexFunc(c.connections, func(p2 circuit) bool {
-		return key.Distance(p2.value) == 0.0
+func (p poz) IsConnected(value poz) bool {
+	rez := slices.IndexFunc(p.connections, func(p2 *poz) bool {
+		return value.Distance(*p2) == 0.0
 	}) != -1
+
+	fmt.Printf("\nChecking connection between %+v and %+v\t%v\n", p, value, rez)
+	return rez
 }
 
-func (c circuit) Connect(key, value poz) {
-	c.connections
+func (p *poz) Connect(p2 *poz) {
+	if p.IsConnected(*p2) {
+		return
+	}
+
+	p.connections = append(p.connections, p2)
+	p2.connections = append(p2.connections, p)
 }
 
 func (p poz) Distance(p2 poz) float64 {
@@ -57,42 +63,44 @@ func (p poz) Distance(p2 poz) float64 {
 	return rez
 }
 
-func Closest(input []poz) (poz, poz) {
-	pair := make([]poz, 2)
-	arr := make([]poz, len(input))
+func Closest(input []poz) (*poz, *poz) {
+	min := math.MaxFloat32
+	var index1 int
+	var index2 int
 
-	var min poz = arr[0]
-	var index int
-	for i, p := range arr {
+	for i, p := range input {
 
-		fmt.Printf("Working with \tp:\t %v\t", p)
-		ind := slices.IndexFunc(arr, func(p2 poz) bool {
-			return p.Distance(p2) == 0.0
+		fmt.Printf("Working with \t\tp:\t %v\t\n", p)
+		fmt.Println("----------------------Calling min function----------------------")
+		tmp := slices.MinFunc(exclude(input, i), func(a, b poz) int {
+			fmt.Printf("a: %v\n", a)
+			fmt.Printf("b: %v\n", b)
+			if p.IsConnected(a) {
+				return int(p.Distance(b))
+			}
+
+			if p.IsConnected(b) {
+				return int(p.Distance(a))
+			}
+
+			return int(p.Distance(b)) - int(p.Distance(a))
 		})
-		clean := exclude(arr, ind)
 
-		tmp := slices.MinFunc(clean, func(a, b poz) int {
-			return int(p.Distance(a)) - int(p.Distance(b))
-		})
+		fmt.Printf("Closest point:\t\t %v\t %v\n", tmp.Distance(p), tmp)
 
-		fmt.Printf("Closest point:\t %v\t %+v\n", tmp.Distance(p), tmp)
+		fmt.Printf("%v Distance(%v): %v\n", p, tmp, p.Distance(tmp))
 
-		if p.Distance(tmp) < p.Distance(min) && !mcir.IsConnected(p, tmp) {
-			min = tmp
-			index = i
+		if val := p.Distance(tmp); val < min {
+			min = val
+			index1 = i
+			index2 = slices.IndexFunc(input, func(p2 poz) bool {
+				return tmp.Distance(p2) == 0.0
+			})
+
 		}
-
-		copy(arr, input)
 	}
 
-	pair[0] = arr[index]
-
-	p2i := slices.IndexFunc(arr, func(p2 poz) bool {
-		return min.Distance(p2) == 0.0
-	})
-	pair[1] = arr[p2i]
-
-	return pair[0], pair[1]
+	return &input[index1], &input[index2]
 }
 
 func NewPoz(x, y, z int) poz {
@@ -117,10 +125,15 @@ func parse(input []string) []poz {
 	return arr
 }
 
-func exclude(arr []poz, index int) []poz {
+func exclude(input []poz, index int) []poz {
+	arr := make([]poz, len(input))
+	copy(arr, input)
 
 	if len(arr)-1 == index {
-		return arr[:index-1]
+		fmt.Printf("rez: %v\n", arr[:index])
+		return arr[:index]
 	}
-	return append(arr[:index], arr[index+1:]...)
+	rez := append(arr[:index], arr[index+1:]...)
+	fmt.Printf("rez: %v\n", rez)
+	return rez
 }
