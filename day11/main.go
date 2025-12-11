@@ -5,25 +5,60 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 )
 
-// TODO: cache only works if we have a reverse algoritam
-var cache map[string][]*device = make(map[string][]*device)
+type SafeMap struct {
+	data map[string][][]*device
+	mu   sync.RWMutex // The Read/Write Mutex
+}
+
+// Write operation: Requires an exclusive Lock()
+func (sm *SafeMap) Set(key string, value []*device) {
+	sm.mu.Lock()         // Acquire an exclusive lock for writing
+	defer sm.mu.Unlock() // Ensure the lock is released when the function exits
+
+	sm.data[key] = append(sm.data[key], value)
+}
+
+// Read operation: Requires a shared RLock()
+func (sm *SafeMap) Get(key string) ([][]*device, bool) {
+	sm.mu.RLock()         // Acquire a shared read lock
+	defer sm.mu.RUnlock() // Ensure the read lock is released
+
+	val, ok := sm.data[key]
+	return val, ok
+}
+
+func (sm *SafeMap) Len() int {
+	sm.mu.RLock()         // Acquire a shared read lock
+	defer sm.mu.RUnlock() // Ensure the read lock is released
+
+	return len(sm.data)
+}
+
+func NewSafeMap() *SafeMap {
+	return &SafeMap{data: make(map[string][][]*device)}
+}
+
+var cache *SafeMap
 
 func main() {
+	cache = NewSafeMap()
 	input := read()
 	devs := parse(input)
-	print(devs)
+	// print(devs)
 	allPaths := make([][]*device, 0)
-	you := slices.IndexFunc(devs, func(d device) bool {
+	you := slices.IndexFunc(devs, func(d *device) bool {
 		return d.name == "svr"
 		// return d.name == "you"
 	})
 
-	dfs(&devs[you], make([]*device, 0), &allPaths)
+	dfs(devs[you], make([]*device, 0), &allPaths)
+	// alg(devs, &allPaths)
+	fmt.Printf("you: %v\n", you)
 
-	fmt.Printf("Result: %v\n", len(allPaths))
-	printAp(allPaths)
+	// printAp(allPaths)
 
 	cnt := 0
 	for _, path := range allPaths {
@@ -34,12 +69,15 @@ func main() {
 		b2 := slices.ContainsFunc(path, func(d *device) bool {
 			return d.name == "dac"
 		})
+
+		printp(path)
 		if b1 && b2 {
 			cnt++
 		}
 	}
+
+	fmt.Printf("Result: %v\n", len(allPaths))
 	fmt.Printf("cnt: %v\n", cnt)
-	printC()
 }
 
 func printAp(allPaths [][]*device) {
@@ -53,10 +91,13 @@ func printAp(allPaths [][]*device) {
 }
 
 func printC() {
-	for i, path := range cache {
+	for i, paths := range cache.data {
 		fmt.Printf("key %s: ", i)
-		for _, dev := range path {
-			fmt.Printf("%v,", dev.name)
+		for _, path := range paths {
+			for _, dev := range path {
+				fmt.Printf("%v,", dev.name)
+			}
+			fmt.Printf("\n\t ")
 		}
 		fmt.Println()
 	}
@@ -92,8 +133,8 @@ func (d *device) Connect(dev *device) {
 	d.conns = append(d.conns, dev)
 }
 
-func parse(input []string) []device {
-	ret := make([]device, 0, len(input))
+func parse(input []string) []*device {
+	ret := make([]*device, 0, len(input))
 	devs := make(map[string]*device)
 
 	for _, line := range input {
@@ -120,18 +161,21 @@ func parse(input []string) []device {
 	}
 
 	for _, dev := range devs {
-		ret = append(ret, *dev)
+		ret = append(ret, dev)
 	}
 
+	slices.SortFunc(ret, func(a, b *device) int {
+		return strings.Compare(a.name, b.name)
+	})
 	return ret
 }
 
 func dfs(src *device, path []*device, allPaths *[][]*device) {
-	fmt.Printf("On device: \t %v options:", src.name)
-	for _, conn := range src.conns {
-		fmt.Printf("%s,", conn.name)
-	}
-	fmt.Println()
+	// fmt.Printf("On device: \t %v options:", src.name)
+	// for _, conn := range src.conns {
+	// 	fmt.Printf("%s,", conn.name)
+	// }
+	// fmt.Println()
 
 	if slices.ContainsFunc(path, func(d *device) bool {
 		return src.name == d.name
@@ -139,32 +183,15 @@ func dfs(src *device, path []*device, allPaths *[][]*device) {
 		fmt.Println("------------------------------Found cicle------------------------------")
 		return
 	}
+
 	path = append(path, src)
 
 	if src.IsOut() {
 		*allPaths = append(*allPaths, path)
-
-		fmt.Println("-----------------------------Found Out-----------------------------")
-
-		for i, dev := range path[1:] {
-			s := path[i:]
-			printp(s)
-			cache[dev.name] = s
-		}
-
+		// fmt.Println("-----------------------------Found Out-----------------------------")
 	} else {
 		for _, dev := range src.conns {
-			cpath, ok := cache[src.name]
-			if ok && false {
-				fmt.Printf("src.name: %v\n", src.name)
-				fmt.Println("-----------------------------Using cache-----------------------------")
-				path = append(path, cpath...)
-				*allPaths = append(*allPaths, path)
-
-			} else {
-				dfs(dev, path, allPaths)
-			}
-
+			dfs(dev, path, allPaths)
 		}
 	}
 
@@ -178,7 +205,7 @@ func printp(devs []*device) {
 	fmt.Println()
 }
 
-func print(devs []device) {
+func print(devs []*device) {
 	for _, dev := range devs {
 		fmt.Printf("name: \t%v\n", dev.name)
 		fmt.Printf("conns: \n")
@@ -187,4 +214,64 @@ func print(devs []device) {
 		}
 		fmt.Println("------------------------------")
 	}
+}
+
+func alg(devices []*device, allPaths *[][]*device) {
+	lastLen := 0
+
+	for _, dev := range devices {
+		ok := slices.ContainsFunc(dev.conns, func(dev *device) bool {
+			return dev.IsOut()
+		})
+
+		if ok {
+			fmt.Println("Found out")
+			cache.Set(dev.name, []*device{dev, {name: "out"}})
+		}
+	}
+	i := 1
+
+	for {
+		if lastLen == cache.Len() {
+			break
+		}
+
+		lastLen = cache.Len()
+
+		fmt.Printf("Passtrought count %d\n", i)
+		i++
+
+		for _, dev := range devices {
+			devList, _ := cache.Get(dev.name)
+			for _, child := range dev.conns {
+				if slices.ContainsFunc(devList, func(d []*device) bool {
+					return child.name == d[1].name || child.IsOut()
+				}) {
+					// fmt.Printf("skipping name: %v\n", child.name)
+					continue
+				}
+
+				paths, ok := cache.Get(child.name)
+				if ok {
+					for _, path := range paths {
+						cache.Set(dev.name, append([]*device{dev}, path...))
+					}
+				}
+			}
+
+		}
+		fmt.Printf("cache: %v\n", len(cache.data))
+	}
+
+	dev := devices[len(devices)-1]
+	for _, child := range dev.conns {
+		paths, ok := cache.Get(child.name)
+		if ok {
+			for _, path := range paths {
+				cache.Set(dev.name, append([]*device{dev}, path...))
+			}
+		}
+	}
+	data, _ := cache.Get("you")
+	*allPaths = append(*allPaths, data...)
 }
